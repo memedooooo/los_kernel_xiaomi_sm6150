@@ -57,6 +57,7 @@
 #define KGSL_PWR_DEL_LIMIT 1
 #define KGSL_PWR_SET_LIMIT 2
 
+
 enum kgsl_pwrctrl_timer_type {
 	KGSL_PWR_IDLE_TIMER,
 };
@@ -136,10 +137,10 @@ struct kgsl_regulator {
  * @ahbpath_pcl - CPU to AHB path bus scale identifier
  * @irq_name - resource name for the IRQ
  * @clk_stats - structure of clock statistics
+
  * @pm_qos_req_dma - the power management quality of service structure
  * @pm_qos_active_latency - allowed CPU latency in microseconds when active
  * @pm_qos_cpu_mask_latency - allowed CPU mask latency in microseconds
- * @input_disable - To disable GPU wakeup on touch input event
  * @pm_qos_wakeup_latency - allowed CPU latency in microseconds during wakeup
  * @bus_control - true if the bus calculation is independent
  * @bus_mod - modifier from the current power level for the bus vote
@@ -193,11 +194,11 @@ struct kgsl_pwrctrl {
 	uint32_t ahbpath_pcl;
 	const char *irq_name;
 	struct kgsl_clk_stats clk_stats;
+
 	struct pm_qos_request pm_qos_req_dma;
 	unsigned int pm_qos_active_latency;
 	unsigned int pm_qos_cpu_mask_latency;
 	unsigned int pm_qos_wakeup_latency;
-	bool input_disable;
 	bool bus_control;
 	int bus_mod;
 	unsigned int bus_percent_ab;
@@ -265,5 +266,6 @@ int kgsl_active_count_wait(struct kgsl_device *device, int count);
 void kgsl_pwrctrl_busy_time(struct kgsl_device *device, u64 time, u64 busy);
 void kgsl_pwrctrl_set_constraint(struct kgsl_device *device,
 			struct kgsl_pwr_constraint *pwrc, uint32_t id);
+
 void kgsl_pwrctrl_set_default_gpu_pwrlevel(struct kgsl_device *device);
 #endif /* __KGSL_PWRCTRL_H */

@@ -255,7 +255,7 @@ struct dsi_panel {
 	enum dsi_doze_mode_type doze_mode;
 
 	int hbm_mode;
-	bool resend_ea;
+	bool resend_ea_hbm;
 
 	struct brightness_alpha_pair *fod_dim_lut;
 	u32 fod_dim_lut_count;
@@ -283,7 +283,7 @@ static inline void dsi_panel_release_panel_lock(struct dsi_panel *panel)
 
 static inline bool dsi_panel_is_type_oled(struct dsi_panel *panel)
 {
-	return (panel->panel_type == DSI_DISPLAY_PANEL_TYPE_OLED);
+	return true;
 }
 
 struct dsi_panel *dsi_panel_get(struct device *parent,

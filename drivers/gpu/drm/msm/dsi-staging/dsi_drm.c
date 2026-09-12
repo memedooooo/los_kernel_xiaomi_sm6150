@@ -564,8 +564,16 @@ static bool dsi_bridge_mode_fixup(struct drm_bridge *bridge,
 			(!(dsi_mode.dsi_mode_flags & DSI_MODE_FLAG_POMS)) &&
 			(!(dsi_mode.dsi_mode_flags & DSI_MODE_FLAG_DYN_CLK)) &&
 			(!crtc_state->active_changed ||
-			 display->is_cont_splash_enabled))
-			dsi_mode.dsi_mode_flags |= DSI_MODE_FLAG_DMS;
+			 display->is_cont_splash_enabled)) {
+			/* Reject DMS for First commit for Video Mode Panel */
+			if((dsi_mode.panel_mode == DSI_OP_VIDEO_MODE) &&
+							display->is_cont_splash_enabled) {
+				pr_err("DMS not supported for display type:%d for first frame\n",
+							dsi_mode.panel_mode);
+			} else {
+				dsi_mode.dsi_mode_flags |= DSI_MODE_FLAG_DMS;
+			}
+		}
 
 		/* Reject seemless transition when active/connectors changed.*/
 		if ((crtc_state->active_changed ||
@@ -994,9 +1002,6 @@ int dsi_connector_get_modes(struct drm_connector *connector, void *data)
 	for (i = 0; i < count; i++) {
 		struct drm_display_mode *m;
 
-		if (modes[i].splash_dms)
-			modes[i].dsi_mode_flags |= DSI_MODE_FLAG_DMS;
-
 		memset(&drm_mode, 0x0, sizeof(drm_mode));
 		dsi_convert_to_drm_mode(&modes[i], &drm_mode);
 		m = drm_mode_duplicate(connector->dev, &drm_mode);
@@ -1013,10 +1018,6 @@ int dsi_connector_get_modes(struct drm_connector *connector, void *data)
 		if (i == 0)
 			m->type |= DRM_MODE_TYPE_PREFERRED;
 		drm_mode_probed_add(connector, m);
-
-		if (modes[i].splash_dms)
-			drm_set_preferred_mode(
-				connector, m->hdisplay, m->vdisplay);
 	}
 
 	rc = dsi_drm_update_edid_name(&edid, display->panel->name);

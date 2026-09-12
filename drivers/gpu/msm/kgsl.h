@@ -125,6 +125,7 @@ struct kgsl_context;
  * @pagetable_list: LIst of open pagetables
  * @ptlock: Lock for accessing the pagetable list
  * @process_mutex: Mutex for accessing the process list
+ * @proclist_lock: Lock for accessing the process list
  * @devlock: Mutex protecting the device list
  * @stats: Struct containing atomic memory statistics
  * @full_cache_threshold: the threshold that triggers a full cache flush
@@ -143,6 +144,7 @@ struct kgsl_driver {
 	struct list_head pagetable_list;
 	spinlock_t ptlock;
 	struct mutex process_mutex;
+	spinlock_t proclist_lock;
 	struct mutex devlock;
 	struct {
 		atomic_long_t vmalloc;
@@ -547,18 +549,19 @@ static inline void kgsl_schedule_work(struct work_struct *work)
 	queue_work(kgsl_driver.workqueue, work);
 }
 
-static inline int
+static inline struct kgsl_mem_entry *
 kgsl_mem_entry_get(struct kgsl_mem_entry *entry)
 {
-	if (entry)
-		return kref_get_unless_zero(&entry->refcount);
-	return 0;
+	if (!IS_ERR_OR_NULL(entry) && kref_get_unless_zero(&entry->refcount))
+		return entry;
+
+	return NULL;
 }
 
 static inline void
 kgsl_mem_entry_put(struct kgsl_mem_entry *entry)
 {
-	if (entry)
+	if (!IS_ERR_OR_NULL(entry))
 		kref_put(&entry->refcount, kgsl_mem_entry_destroy);
 }
 

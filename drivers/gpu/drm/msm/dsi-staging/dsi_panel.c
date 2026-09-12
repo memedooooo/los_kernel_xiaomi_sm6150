@@ -29,10 +29,8 @@
 #include <linux/double_click.h>
 #endif
 
+#ifdef CONFIG_EXPOSURE_ADJUSTMENT
 #include "exposure_adjustment.h"
-
-#ifdef CONFIG_KLAPSE
-#include <linux/klapse.h>
 #endif
 
 /**
@@ -279,7 +277,7 @@ static int dsi_panel_gpio_request(struct dsi_panel *panel)
 	if (gpio_is_valid(r_config->reset_gpio)) {
 		rc = gpio_request(r_config->reset_gpio, "reset_gpio");
 		if (rc) {
-			pr_err("request for reset_gpio failed, rc=%d\n", rc);
+			pr_debug("request for reset_gpio failed, rc=%d\n", rc);
 			goto error;
 		}
 	}
@@ -287,7 +285,7 @@ static int dsi_panel_gpio_request(struct dsi_panel *panel)
 	if (gpio_is_valid(r_config->disp_en_gpio)) {
 		rc = gpio_request(r_config->disp_en_gpio, "disp_en_gpio");
 		if (rc) {
-			pr_err("request for disp_en_gpio failed, rc=%d\n", rc);
+			pr_debug("request for disp_en_gpio failed, rc=%d\n", rc);
 			goto error_release_reset;
 		}
 	}
@@ -295,7 +293,7 @@ static int dsi_panel_gpio_request(struct dsi_panel *panel)
 	if (gpio_is_valid(panel->bl_config.en_gpio)) {
 		rc = gpio_request(panel->bl_config.en_gpio, "bklt_en_gpio");
 		if (rc) {
-			pr_err("request for bklt_en_gpio failed, rc=%d\n", rc);
+			pr_debug("request for bklt_en_gpio failed, rc=%d\n", rc);
 			goto error_release_disp_en;
 		}
 	}
@@ -359,7 +357,7 @@ int dsi_panel_trigger_esd_attack(struct dsi_panel *panel)
 
 	if (gpio_is_valid(r_config->reset_gpio)) {
 		gpio_set_value(r_config->reset_gpio, 0);
-		pr_info("GPIO pulled low to simulate ESD\n");
+		pr_debug("GPIO pulled low to simulate ESD\n");
 		return 0;
 	}
 	pr_err("failed to pull down gpio\n");
@@ -672,10 +670,6 @@ static int dsi_panel_update_backlight(struct dsi_panel *panel,
 	}
 
 	dsi = &panel->mipi_device;
-	
-#ifdef CONFIG_KLAPSE
-	set_rgb_slider(bl_lvl);
-#endif
 
 	if (panel->bl_config.bl_inverted_dbv)
 		bl_lvl = (((bl_lvl & 0xff) << 8) | (bl_lvl >> 8));
@@ -706,7 +700,7 @@ static int dsi_panel_update_pwm_backlight(struct dsi_panel *panel,
 
 	bl = &panel->bl_config;
 	if (!bl->pwm_bl) {
-		pr_err("pwm device not found\n");
+		pr_debug("pwm device not found\n");
 		return -EINVAL;
 	}
 
@@ -841,11 +835,6 @@ int dsi_panel_set_fod_hbm(struct dsi_panel *panel, bool status)
 		return rc;
 
 	if (status) {
-
-		if (ea_panel_is_enabled()) {
-			ea_panel_mode_ctrl(panel, 0);
-			panel->resend_ea = true;
-		}
 		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_HBM_FOD_ON);
 		if (rc)
 			pr_err("[%s] failed to send DSI_CMD_SET_DISP_HBM_FOD_ON cmd, rc=%d\n",
@@ -857,10 +846,6 @@ int dsi_panel_set_fod_hbm(struct dsi_panel *panel, bool status)
 		if (rc)
 			pr_err("[%s] failed to send DSI_CMD_SET_DISP_HBM_FOD_OFF cmd, rc=%d\n",
 					panel->name, rc);
-		if (panel->resend_ea) {
-			ea_panel_mode_ctrl(panel, 1);
-			panel->resend_ea = false;
-		}
 	}
 
 	return rc;
@@ -877,12 +862,10 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 
 	pr_debug("backlight type:%d lvl:%d\n", bl->type, bl_lvl);
 
+#ifdef CONFIG_EXPOSURE_ADJUSTMENT
 	if (bl_lvl > 0)
 		bl_lvl = ea_panel_calc_backlight(bl_lvl < bl_dc_min ? bl_dc_min : bl_lvl);
-		
-	if (bl_lvl == 0)
-        dsi_panel_tx_cmd_set(panel,
-                DSI_CMD_SET_DISP_DIMMINGOFF);
+#endif
 
 	switch (bl->type) {
 	case DSI_BACKLIGHT_WLED:
@@ -897,7 +880,7 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 		rc = dsi_panel_update_pwm_backlight(panel, bl_lvl);
 		break;
 	default:
-		pr_err("Backlight type(%d) not supported\n", bl->type);
+		pr_debug("Backlight type(%d) not supported\n", bl->type);
 		rc = -ENOTSUPP;
 	}
 
@@ -1840,7 +1823,7 @@ static int dsi_panel_parse_panel_mode(struct dsi_panel *panel)
 
 	panel_mode_switch_enabled = utils->read_bool(utils->data,
 			"qcom,mdss-dsi-panel-mode-switch");
-	pr_info("%s: panel operating mode switch feature %s\n", __func__,
+	pr_debug("%s: panel operating mode switch feature %s\n", __func__,
 		(panel_mode_switch_enabled ? "enabled" : "disabled"));
 
 	if (panel_mode == DSI_OP_VIDEO_MODE || panel_mode_switch_enabled) {
@@ -1945,7 +1928,6 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-post-mode-switch-on-command",
 	"qcom,mdss-dsi-qsync-on-commands",
 	"qcom,mdss-dsi-qsync-off-commands",
-	"qcom,mdss-dsi-dispparam-dimmingoff-command",
 	"qcom,mdss-dsi-doze-hbm-command",
 	"qcom,mdss-dsi-doze-lbm-command",
 	"qcom,mdss-dsi-dispparam-hbm-on-command",
@@ -1983,7 +1965,6 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-post-mode-switch-on-command-state",
 	"qcom,mdss-dsi-qsync-on-commands-state",
 	"qcom,mdss-dsi-qsync-off-commands-state",
-	"qcom,mdss-dsi-dispparam-dimmingoff-command-state",
 	"qcom,mdss-dsi-dispparam-hbm-on-command-state",
 	"qcom,mdss-dsi-dispparam-hbm-off-command-state",
 	"qcom,mdss-dsi-doze-hbm-command-state",
@@ -2269,14 +2250,16 @@ static int dsi_panel_parse_misc_features(struct dsi_panel *panel)
 {
 	struct dsi_parser_utils *utils = &panel->utils;
 
-	panel->ulps_feature_enabled = true;
+	panel->ulps_feature_enabled =
+		utils->read_bool(utils->data, "qcom,ulps-enabled");
 
-	pr_info("%s: ulps feature %s\n", __func__,
+	pr_debug("%s: ulps feature %s\n", __func__,
 		(panel->ulps_feature_enabled ? "enabled" : "disabled"));
 
-	panel->ulps_suspend_enabled = true;
+	panel->ulps_suspend_enabled =
+		utils->read_bool(utils->data, "qcom,suspend-ulps-enabled");
 
-	pr_info("%s: ulps during suspend feature %s", __func__,
+	pr_debug("%s: ulps during suspend feature %s", __func__,
 		(panel->ulps_suspend_enabled ? "enabled" : "disabled"));
 
 	panel->te_using_watchdog_timer = utils->read_bool(utils->data,
@@ -3138,7 +3121,7 @@ static int dsi_panel_parse_topology(
 	};
 
 	if (topology_override >= 0 && topology_override < top_count) {
-		pr_info("override topology: cfg:%d lm:%d comp_enc:%d intf:%d\n",
+		pr_debug("override topology: cfg:%d lm:%d comp_enc:%d intf:%d\n",
 			topology_override,
 			topology[topology_override].num_lm,
 			topology[topology_override].num_enc,
@@ -3161,7 +3144,7 @@ static int dsi_panel_parse_topology(
 		goto parse_fail;
 	}
 
-	pr_info("default topology: lm: %d comp_enc:%d intf: %d\n",
+	pr_debug("default topology: lm: %d comp_enc:%d intf: %d\n",
 		topology[top_sel].num_lm,
 		topology[top_sel].num_enc,
 		topology[top_sel].num_intf);
@@ -3212,7 +3195,7 @@ static int dsi_panel_parse_roi_alignment(struct dsi_parser_utils *utils,
 			align->min_height = value[5];
 		}
 
-		pr_info("roi alignment: [%d, %d, %d, %d, %d, %d]\n",
+		pr_debug("roi alignment: [%d, %d, %d, %d, %d, %d]\n",
 			align->xstart_pix_align,
 			align->width_pix_align,
 			align->ystart_pix_align,
@@ -3248,13 +3231,13 @@ static int dsi_panel_parse_partial_update_caps(struct dsi_display_mode *mode,
 		else if (!strcmp(data, "single_roi"))
 			roi_caps->num_roi = 1;
 		else {
-			pr_info(
+			pr_debug(
 			"invalid value for qcom,partial-update-enabled: %s\n",
 			data);
 			return 0;
 		}
 	} else {
-		pr_info("partial update disabled as the property is not set\n");
+		pr_debug("partial update disabled as the property is not set\n");
 		return 0;
 	}
 
@@ -3263,7 +3246,7 @@ static int dsi_panel_parse_partial_update_caps(struct dsi_display_mode *mode,
 
 	roi_caps->enabled = roi_caps->num_roi > 0;
 
-	pr_info("partial update num_rois=%d enabled=%d\n", roi_caps->num_roi,
+	pr_debug("partial update num_rois=%d enabled=%d\n", roi_caps->num_roi,
 			roi_caps->enabled);
 
 	if (roi_caps->enabled)
@@ -3564,7 +3547,7 @@ static int dsi_panel_parse_esd_config(struct dsi_panel *panel)
 		esd_mode = "te_check";
 	}
 
-	pr_info("ESD enabled with mode: %s\n", esd_mode);
+	pr_debug("ESD enabled with mode: %s\n", esd_mode);
 
 	return 0;
 
@@ -3902,10 +3885,17 @@ void dsi_panel_gamma_mode_change(struct dsi_panel *panel,
 	if (!count)
 		goto exit;
 
-	if (adj_mode->timing.refresh_rate == 120)
+	switch (adj_mode->timing.refresh_rate) {
+	case 120:
 		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_BC_120HZ);
-	else if (adj_mode->timing.refresh_rate == 60)
+		break;
+	case 90:
+	case 60:
 		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_BC_60HZ);
+		break;
+	default:
+		break;
+	}
 
 	if (rc)
 		pr_err("%s: send cmds failed...", __func__);
@@ -4160,9 +4150,6 @@ int dsi_panel_get_mode(struct dsi_panel *panel,
 
 		if (mode->panel_mode == DSI_OP_VIDEO_MODE)
 			mode->priv_info->mdp_transfer_time_us = 0;
-		
-		mode->splash_dms = of_property_read_bool(child_np,
-				"qcom,mdss-dsi-splash-dms-switch-to-this-timing");
 	}
 	goto done;
 
@@ -4274,7 +4261,7 @@ int dsi_panel_update_pps(struct dsi_panel *panel)
 
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_PPS);
 	if (rc) {
-		pr_err("[%s] failed to send DSI_CMD_SET_PPS cmds, rc=%d\n",
+		pr_debug("[%s] failed to send DSI_CMD_SET_PPS cmds, rc=%d\n",
 			panel->name, rc);
 	}
 
@@ -4311,7 +4298,7 @@ int dsi_panel_set_lp1(struct dsi_panel *panel)
 			"ibb", REGULATOR_MODE_IDLE);
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_LP1);
 	if (rc)
-		pr_err("[%s] failed to send DSI_CMD_SET_LP1 cmd, rc=%d\n",
+		pr_debug("[%s] failed to send DSI_CMD_SET_LP1 cmd, rc=%d\n",
 		       panel->name, rc);
 
 	rc = dsi_panel_set_doze_status(panel, true);
@@ -4337,7 +4324,7 @@ int dsi_panel_set_lp2(struct dsi_panel *panel)
 
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_LP2);
 	if (rc)
-		pr_err("[%s] failed to send DSI_CMD_SET_LP2 cmd, rc=%d\n",
+		pr_debug("[%s] failed to send DSI_CMD_SET_LP2 cmd, rc=%d\n",
 		       panel->name, rc);
 
 	rc = dsi_panel_set_doze_status(panel, true);
@@ -4371,7 +4358,7 @@ int dsi_panel_set_nolp(struct dsi_panel *panel)
 			"ibb", REGULATOR_MODE_NORMAL);
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_NOLP);
 	if (rc)
-		pr_err("[%s] failed to send DSI_CMD_SET_NOLP cmd, rc=%d\n",
+		pr_debug("[%s] failed to send DSI_CMD_SET_NOLP cmd, rc=%d\n",
 		       panel->name, rc);
 
 	rc = dsi_panel_set_doze_status(panel, false);
@@ -4410,7 +4397,7 @@ int dsi_panel_prepare(struct dsi_panel *panel)
 
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_PRE_ON);
 	if (rc) {
-		pr_err("[%s] failed to send DSI_CMD_SET_PRE_ON cmds, rc=%d\n",
+		pr_debug("[%s] failed to send DSI_CMD_SET_PRE_ON cmds, rc=%d\n",
 		       panel->name, rc);
 		goto error;
 	}
@@ -4512,7 +4499,7 @@ int dsi_panel_send_qsync_on_dcs(struct dsi_panel *panel,
 	pr_debug("ctrl:%d qsync on\n", ctrl_idx);
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_QSYNC_ON);
 	if (rc)
-		pr_err("[%s] failed to send DSI_CMD_SET_QSYNC_ON cmds rc=%d\n",
+		pr_debug("[%s] failed to send DSI_CMD_SET_QSYNC_ON cmds rc=%d\n",
 		       panel->name, rc);
 
 	mutex_unlock(&panel->panel_lock);
@@ -4534,7 +4521,7 @@ int dsi_panel_send_qsync_off_dcs(struct dsi_panel *panel,
 	pr_debug("ctrl:%d qsync off\n", ctrl_idx);
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_QSYNC_OFF);
 	if (rc)
-		pr_err("[%s] failed to send DSI_CMD_SET_QSYNC_OFF cmds rc=%d\n",
+		pr_debug("[%s] failed to send DSI_CMD_SET_QSYNC_OFF cmds rc=%d\n",
 		       panel->name, rc);
 
 	mutex_unlock(&panel->panel_lock);
@@ -4666,7 +4653,7 @@ int dsi_panel_switch(struct dsi_panel *panel)
 
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_TIMING_SWITCH);
 	if (rc)
-		pr_err("[%s] failed to send DSI_CMD_SET_TIMING_SWITCH cmds, rc=%d\n",
+		pr_debug("[%s] failed to send DSI_CMD_SET_TIMING_SWITCH cmds, rc=%d\n",
 		       panel->name, rc);
 
 	mutex_unlock(&panel->panel_lock);
@@ -4686,7 +4673,7 @@ int dsi_panel_post_switch(struct dsi_panel *panel)
 
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_POST_TIMING_SWITCH);
 	if (rc)
-		pr_err("[%s] failed to send DSI_CMD_SET_POST_TIMING_SWITCH cmds, rc=%d\n",
+		pr_debug("[%s] failed to send DSI_CMD_SET_POST_TIMING_SWITCH cmds, rc=%d\n",
 		       panel->name, rc);
 
 	mutex_unlock(&panel->panel_lock);
@@ -4739,7 +4726,7 @@ int dsi_panel_post_enable(struct dsi_panel *panel)
 
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_POST_ON);
 	if (rc) {
-		pr_err("[%s] failed to send DSI_CMD_SET_POST_ON cmds, rc=%d\n",
+		pr_debug("[%s] failed to send DSI_CMD_SET_POST_ON cmds, rc=%d\n",
 		       panel->name, rc);
 		goto error;
 	}
@@ -4880,11 +4867,18 @@ int dsi_panel_apply_hbm_mode(struct dsi_panel *panel)
 	enum dsi_cmd_set_type type;
 	int rc;
 
-	if (panel->hbm_mode >= 0 &&
-		panel->hbm_mode < ARRAY_SIZE(type_map))
+	if (panel->hbm_mode >= 0 && panel->hbm_mode < ARRAY_SIZE(type_map)) {
+		if (ea_panel_is_enabled() && panel->hbm_mode != 0) {
+			ea_panel_mode_ctrl(panel, 0);
+			panel->resend_ea_hbm = true;
+		} else if (panel->resend_ea_hbm && panel->hbm_mode == 0) {
+			ea_panel_mode_ctrl(panel, 1);
+			panel->resend_ea_hbm = false;
+		}
 		type = type_map[panel->hbm_mode];
-	else
+	} else {
 		type = type_map[0];
+	}
 
 	mutex_lock(&panel->panel_lock);
 	rc = dsi_panel_tx_cmd_set(panel, type);

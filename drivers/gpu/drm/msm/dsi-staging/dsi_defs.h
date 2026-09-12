@@ -310,7 +310,6 @@ enum dsi_cmd_set_type {
 	DSI_CMD_SET_POST_TIMING_SWITCH,
 	DSI_CMD_SET_QSYNC_ON,
 	DSI_CMD_SET_QSYNC_OFF,
-	DSI_CMD_SET_DISP_DIMMINGOFF,
 	DSI_CMD_SET_DOZE_HBM,
 	DSI_CMD_SET_DOZE_LBM,
 	DSI_CMD_SET_DISP_HBM_ON,
@@ -546,7 +545,6 @@ struct dsi_video_engine_cfg {
 	bool hsa_lp11_en;
 	bool eof_bllp_lp11_en;
 	bool bllp_lp11_en;
-	bool splash_dms;
 	enum dsi_video_traffic_mode traffic_mode;
 	u32 vc_id;
 	u32 dma_sched_line;
@@ -644,7 +642,6 @@ struct dsi_display_mode {
 	u32 pixel_clk_khz;
 	enum dsi_op_mode panel_mode;
 	u32 dsi_mode_flags;
-	bool splash_dms;
 	struct dsi_display_mode_priv_info *priv_info;
 };
 
