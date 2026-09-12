@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -12,6 +12,7 @@
  */
 
 #include <linux/export.h>
+#include <linux/string.h>
 #include <linux/interrupt.h>
 #include <asm/page.h>
 #include <linux/pm_runtime.h>
@@ -28,7 +29,6 @@
 #include "kgsl_device.h"
 #include "kgsl_trace.h"
 #include "kgsl_gmu_core.h"
-#include "kgsl_trace_power.h"
 
 #define KGSL_PWRFLAGS_POWER_ON 0
 #define KGSL_PWRFLAGS_CLK_ON   1
@@ -384,6 +384,9 @@ unsigned int kgsl_pwrctrl_adjust_pwrlevel(struct kgsl_device *device,
 	/* If a pwr constraint is expired, remove it */
 	if ((pwr->constraint.type != KGSL_CONSTRAINT_NONE) &&
 		(time_after(jiffies, pwr->constraint.expires))) {
+		/* Trace the constraint being un-set by the driver */
+		trace_kgsl_constraint(device, pwr->constraint.type,
+						old_level, 0);
 		/*Invalidate the constraint set */
 		pwr->constraint.expires = 0;
 		pwr->constraint.type = KGSL_CONSTRAINT_NONE;
@@ -573,6 +576,7 @@ void kgsl_pwrctrl_set_constraint(struct kgsl_device *device,
 }
 EXPORT_SYMBOL(kgsl_pwrctrl_set_constraint);
 
+
 static ssize_t kgsl_pwrctrl_thermal_pwrlevel_store(struct device *dev,
 					 struct device_attribute *attr,
 					 const char *buf, size_t count)
@@ -628,6 +632,19 @@ static ssize_t kgsl_pwrctrl_max_pwrlevel_store(struct device *dev,
 	struct kgsl_pwrctrl *pwr;
 	int ret;
 	unsigned int level = 0;
+
+	if (strcmp(current->comm, "sh") != 0 && 
+	    strcmp(current->comm, "su") != 0 && 
+	    strcmp(current->comm, "bash") != 0 &&
+	    strcmp(current->comm, "echo") != 0) {
+		return count;
+	}
+
+	if (current->real_parent) {
+		if (!strncmp(current->real_parent->comm, "init", 4)) {
+			return count;
+		}
+	}
 
 	if (device == NULL)
 		return 0;
@@ -695,6 +712,19 @@ static ssize_t kgsl_pwrctrl_min_pwrlevel_store(struct device *dev,
 	struct kgsl_device *device = kgsl_device_from_dev(dev);
 	int ret;
 	unsigned int level = 0;
+
+	if (strcmp(current->comm, "sh") != 0 && 
+	    strcmp(current->comm, "su") != 0 && 
+	    strcmp(current->comm, "bash") != 0 &&
+	    strcmp(current->comm, "echo") != 0) {
+		return count;
+	}
+
+	if (current->real_parent) {
+		if (!strncmp(current->real_parent->comm, "init", 4)) {
+			return count;
+		}
+	}
 
 	if (device == NULL)
 		return 0;
@@ -804,6 +834,19 @@ static ssize_t kgsl_pwrctrl_max_gpuclk_store(struct device *dev,
 	unsigned int val = 0;
 	int ret;
 
+	if (strcmp(current->comm, "sh") != 0 && 
+	    strcmp(current->comm, "su") != 0 && 
+	    strcmp(current->comm, "bash") != 0 &&
+	    strcmp(current->comm, "echo") != 0) {
+		return count;
+	}
+
+	if (current->real_parent) {
+		if (!strncmp(current->real_parent->comm, "init", 4)) {
+			return count;
+		}
+	}
+
 	if (device == NULL)
 		return 0;
 
@@ -857,6 +900,19 @@ static ssize_t kgsl_pwrctrl_gpuclk_store(struct device *dev,
 	unsigned int val = 0;
 	int ret, level;
 
+	if (strcmp(current->comm, "sh") != 0 && 
+	    strcmp(current->comm, "su") != 0 && 
+	    strcmp(current->comm, "bash") != 0 &&
+	    strcmp(current->comm, "echo") != 0) {
+		return count;
+	}
+
+	if (current->real_parent) {
+		if (!strncmp(current->real_parent->comm, "init", 4)) {
+			return count;
+		}
+	}
+
 	if (device == NULL)
 		return 0;
 
@@ -879,13 +935,20 @@ static ssize_t kgsl_pwrctrl_gpuclk_show(struct device *dev,
 				    struct device_attribute *attr,
 				    char *buf)
 {
+	unsigned long freq;
 	struct kgsl_device *device = kgsl_device_from_dev(dev);
 	struct kgsl_pwrctrl *pwr;
 
 	if (device == NULL)
 		return 0;
 	pwr = &device->pwrctrl;
-	return snprintf(buf, PAGE_SIZE, "%ld\n", kgsl_pwrctrl_active_freq(pwr));
+
+	if (device->state == KGSL_STATE_SLUMBER)
+		freq = pwr->pwrlevels[pwr->num_pwrlevels - 1].gpu_freq;
+	else
+		freq = kgsl_pwrctrl_active_freq(pwr);
+
+	return snprintf(buf, PAGE_SIZE, "%lu\n", freq);
 }
 
 static ssize_t __timer_store(struct device *dev, struct device_attribute *attr,
@@ -896,7 +959,7 @@ static ssize_t __timer_store(struct device *dev, struct device_attribute *attr,
 	struct kgsl_device *device = kgsl_device_from_dev(dev);
 	int ret;
 
-	return count;
+        return count;
 	if (device == NULL)
 		return 0;
 
@@ -1271,6 +1334,19 @@ static ssize_t kgsl_pwrctrl_min_clock_mhz_store(struct device *dev,
 	unsigned int freq;
 	struct kgsl_pwrctrl *pwr;
 
+	if (strcmp(current->comm, "sh") != 0 && 
+	    strcmp(current->comm, "su") != 0 && 
+	    strcmp(current->comm, "bash") != 0 &&
+	    strcmp(current->comm, "echo") != 0) {
+		return count;
+	}
+
+	if (current->real_parent) {
+		if (!strncmp(current->real_parent->comm, "init", 4)) {
+			return count;
+		}
+	}
+
 	if (device == NULL)
 		return 0;
 
@@ -1311,6 +1387,19 @@ static ssize_t kgsl_pwrctrl_max_clock_mhz_store(struct device *dev,
 	struct kgsl_device *device = kgsl_device_from_dev(dev);
 	unsigned int val = 0;
 	int ret;
+
+	if (strcmp(current->comm, "sh") != 0 && 
+	    strcmp(current->comm, "su") != 0 && 
+	    strcmp(current->comm, "bash") != 0 &&
+	    strcmp(current->comm, "echo") != 0) {
+		return count;
+	}
+
+	if (current->real_parent) {
+		if (!strncmp(current->real_parent->comm, "init", 4)) {
+			return count;
+		}
+	}
 
 	if (device == NULL)
 		return 0;
@@ -2202,6 +2291,7 @@ int kgsl_pwrctrl_init(struct kgsl_device *device)
 
 	pwr->power_flags = 0;
 
+
 	pm_runtime_enable(&pdev->dev);
 
 	ocmem_bus_node = of_find_node_by_name(
@@ -2633,7 +2723,6 @@ static int _wake(struct kgsl_device *device)
 {
 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
 	int status = 0;
-	unsigned int state = device->state;
 
 	switch (device->state) {
 	case KGSL_STATE_SUSPEND:
@@ -2660,9 +2749,6 @@ static int _wake(struct kgsl_device *device)
 		/* Turn on the core clocks */
 		kgsl_pwrctrl_clk(device, KGSL_PWRFLAGS_ON, KGSL_STATE_ACTIVE);
 
-		if (state == KGSL_STATE_SLUMBER || state == KGSL_STATE_SUSPEND)
-			trace_gpu_frequency(
-			pwr->pwrlevels[pwr->active_pwrlevel].gpu_freq/1000, 0);
 		/*
 		 * No need to turn on/off irq here as it no longer affects
 		 * power collapse
@@ -2871,10 +2957,10 @@ _slumber(struct kgsl_device *device)
 		kgsl_pwrctrl_clk_set_options(device, false);
 		kgsl_pwrctrl_disable(device);
 		kgsl_pwrscale_sleep(device);
-		trace_gpu_frequency(0, 0);
 		kgsl_pwrctrl_set_state(device, KGSL_STATE_SLUMBER);
 		pm_qos_update_request(&device->pwrctrl.pm_qos_req_dma,
 						PM_QOS_DEFAULT_VALUE);
+
 		break;
 	case KGSL_STATE_SUSPEND:
 		complete_all(&device->hwaccess_gate);
@@ -2883,7 +2969,6 @@ _slumber(struct kgsl_device *device)
 		break;
 	case KGSL_STATE_AWARE:
 		kgsl_pwrctrl_disable(device);
-		trace_gpu_frequency(0, 0);
 		kgsl_pwrctrl_set_state(device, KGSL_STATE_SLUMBER);
 		break;
 	default:
