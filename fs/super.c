@@ -36,9 +36,10 @@
 #include <linux/fsnotify.h>
 #include <linux/lockdep.h>
 #include <linux/user_namespace.h>
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_KSU_SUSFS
 #include <linux/susfs_def.h>
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#include <linux/jump_label.h>
+#endif // #ifdef CONFIG_KSU_SUSFS
 #include "internal.h"
 
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
@@ -977,37 +978,38 @@ static DEFINE_IDA(unnamed_dev_ida);
  */
 int get_anon_bdev(dev_t *p)
 {
-	int dev;
+        int dev;
 
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-	if (static_branch_unlikely(&susfs_is_sdcard_android_data_not_decrypted)) {
-		if (susfs_is_current_ksu_domain()) {
-			dev = ida_alloc_range(&unnamed_dev_ida, DEFAULT_KSU_MNT_MINOR_DEV, (1 << MINORBITS) - 1,
-				GFP_ATOMIC);
-			if (dev == -ENOSPC)
-				dev = -EMFILE;
-			if (dev < 0)
-				return dev;
+        if (static_branch_unlikely(&susfs_is_sdcard_android_data_not_decrypted) &&
+            susfs_is_current_ksu_domain()) {
+                dev = ida_alloc_range(&unnamed_dev_ida,
+                                      DEFAULT_KSU_MNT_MINOR_DEV,
+                                      (1 << MINORBITS) - 1,
+                                      GFP_ATOMIC);
+                if (dev == -ENOSPC)
+                        dev = -EMFILE;
+                if (dev < 0)
+                        return dev;
 
-			*p = MKDEV(0, dev);
-			return 0;
-		}
-	}
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+                *p = MKDEV(0, dev);
+                return 0;
+        }
+#endif
 
-	/*
-	 * Many userspace utilities consider an FSID of 0 invalid.
-	 * Always return at least 1 from get_anon_bdev.
-	 */
-	dev = ida_alloc_range(&unnamed_dev_ida, 1, (1 << MINORBITS) - 1,
-			GFP_ATOMIC);
-	if (dev == -ENOSPC)
-		dev = -EMFILE;
-	if (dev < 0)
-		return dev;
+        /*
+         * Many userspace utilities consider an FSID of 0 invalid.
+         * Always return at least 1 from get_anon_bdev.
+         */
+        dev = ida_alloc_range(&unnamed_dev_ida, 1,
+                              (1 << MINORBITS) - 1, GFP_ATOMIC);
+        if (dev == -ENOSPC)
+                dev = -EMFILE;
+        if (dev < 0)
+                return dev;
 
-	*p = MKDEV(0, dev);
-	return 0;
+        *p = MKDEV(0, dev);
+        return 0;
 }
 EXPORT_SYMBOL(get_anon_bdev);
 

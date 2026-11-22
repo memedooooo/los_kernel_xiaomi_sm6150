@@ -39,6 +39,7 @@ extern bool susfs_is_current_ksu_domain(void);
 extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;
 
 #define CL_COPY_MNT_NS BIT(25) /* used by copy_mnt_ns() */
+
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 
 /* Maximum number of mounts in a mount namespace */
@@ -120,11 +121,10 @@ static int mnt_alloc_id(struct mount *mnt)
 static void mnt_free_id(struct mount *mnt)
 {
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-	if (mnt->mnt.mnt_flags & VFSMOUNT_MNT_FLAGS_KSU_UNSHARED_MNT)
-		return;
-
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-	ida_free(&mnt_id_ida, mnt->mnt_id);
+        if (unlikely(mnt->mnt.mnt_flags & VFSMOUNT_MNT_FLAGS_KSU_UNSHARED_MNT))
+                return;
+#endif
+        ida_free(&mnt_id_ida, mnt->mnt_id);
 }
 
 /*
@@ -132,27 +132,18 @@ static void mnt_free_id(struct mount *mnt)
  */
 static int mnt_alloc_group_id(struct mount *mnt)
 {
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-	int res;
+        int min_id = 1;
+        int res;
 
-	/* - At first susfs_is_sdcard_android_data_not_decrypted is set to true in kernel,
-	 *   and it is still allowed to assign our custom mnt_group_id via susfs_ksu_mnt_group_ida
-	 *   if it is ksu mounts, until susfs_is_sdcard_android_data_not_decrypted is set to false
-	 *   when boot-completed stage is triggered in core_hook.c
-	 */
-	if (susfs_is_current_ksu_domain()) {
-		res = ida_alloc_min(&mnt_group_ida, DEFAULT_KSU_MNT_GROUP_ID, GFP_KERNEL);
-		goto bypass_orig_flow;
-	}
-	res = ida_alloc_min(&mnt_group_ida, 1, GFP_KERNEL);
-bypass_orig_flow:
-#else
-	int res = ida_alloc_min(&mnt_group_ida, 1, GFP_KERNEL);
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+        if (susfs_is_current_ksu_domain())
+                min_id = DEFAULT_KSU_MNT_GROUP_ID;
 #endif
-	if (res < 0)
-		return res;
-	mnt->mnt_group_id = res;
-	return 0;
+        res = ida_alloc_min(&mnt_group_ida, min_id, GFP_KERNEL);
+        if (res < 0)
+                return res;
+        mnt->mnt_group_id = res;
+        return 0;
 }
 
 /*
@@ -160,8 +151,8 @@ bypass_orig_flow:
  */
 void mnt_release_group_id(struct mount *mnt)
 {
-	ida_free(&mnt_group_ida, mnt->mnt_group_id);
-	mnt->mnt_group_id = 0;
+        ida_free(&mnt_group_ida, mnt->mnt_group_id);
+        mnt->mnt_group_id = 0;
 }
 
 /*
@@ -215,10 +206,11 @@ static struct mount *susfs_alloc_unshare_ksu_vfsmnt(const char *name, int old_mn
 
 	if (mnt) {
 		mnt->mnt_id = old_mnt_id;
+                mnt->mnt.mnt_flags |= VFSMOUNT_MNT_FLAGS_KSU_UNSHARED_MNT;
 
 		if (name) {
 			mnt->mnt_devname = kstrdup_const(name,
-							 GFP_KERNEL_ACCOUNT);
+											 GFP_KERNEL_ACCOUNT);
 			if (!mnt->mnt_devname)
 				goto out_free_cache;
 		}
@@ -256,9 +248,6 @@ out_free_cache:
 	kmem_cache_free(mnt_cache, mnt);
 	return NULL;
 }
-#endif
-
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 /* A copy of alloc_vfsmnt() but allocates the fake mnt_id for mount
  * that is mounted or single cloned by ksu process
  */
@@ -276,7 +265,7 @@ static struct mount *susfs_alloc_non_unshare_ksu_vfsmnt(const char *name)
 
 		if (name) {
 			mnt->mnt_devname = kstrdup_const(name,
-							 GFP_KERNEL_ACCOUNT);
+											 GFP_KERNEL_ACCOUNT);
 			if (!mnt->mnt_devname)
 				goto out_free_id;
 		}
@@ -316,7 +305,7 @@ out_free_cache:
 	kmem_cache_free(mnt_cache, mnt);
 	return NULL;
 }
-#endif
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 
 static struct mount *alloc_vfsmnt(const char *name)
 {
@@ -821,16 +810,19 @@ struct mount *__lookup_mnt(struct vfsmount *mnt, struct dentry *dentry)
 	struct mount *p;
 
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-	// - Spoof __lookup_mnt() for any process marked with TIF_PROC_UMOUNTED (zygote
-	//   spawned app or zygote_next spawned process). Return the legit (non-sus)
-	//   mount so these processes never traverse the sus mounts, without us having
-	//   to actually umount them.
+	// - The hook here is needed as a temp solution to hide sus mnts for zygote_next
+	//   spawned process since it just inherits the init mount namespace, and here
+	//   we also spoof for the zygote spawned processes that are marked umounted,
+	//   with this hack, we do not even need to umount those sus mounts.
+	// - The solution here is simply to return the legit mount.
 	if (susfs_is_current_proc_umounted()) {
 		hlist_for_each_entry_rcu(p, head, mnt_hash)
 			if (p->mnt_id < DEFAULT_KSU_MNT_ID && &p->mnt_parent->mnt == mnt && p->mnt_mountpoint == dentry)
 				return p;
+		return NULL;
 	}
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+
 	hlist_for_each_entry_rcu(p, head, mnt_hash)
 		if (&p->mnt_parent->mnt == mnt && p->mnt_mountpoint == dentry)
 			return p;
@@ -1172,12 +1164,14 @@ vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void 
 	//   for the sake of performance
 	if (static_branch_unlikely(&susfs_is_sdcard_android_data_not_decrypted)) {
 		if (susfs_is_current_ksu_domain()) {
-			mnt = susfs_alloc_non_unshare_ksu_vfsmnt(name ?: "none");
+			mnt = susfs_alloc_non_unshare_ksu_vfsmnt(name ?:"none");
 			goto bypass_orig_flow;
 		}
 	}
 #endif
+
 	mnt = alloc_vfsmnt(name);
+
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 bypass_orig_flow:
 #endif
@@ -1234,32 +1228,30 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
 	struct super_block *sb = old->mnt.mnt_sb;
 	struct mount *mnt;
 	int err;
+
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 	bool is_mnt_ksu_unshared = false;
+
 	// - We will just stop checking for ksu process if /sdcard/Android is accessible,
 	//   for the sake of performance
-	if (!static_branch_unlikely(&susfs_is_sdcard_android_data_not_decrypted)) {
-		goto skip_checking_for_ksu_proc;
-	}
-
+	if (static_branch_unlikely(&susfs_is_sdcard_android_data_not_decrypted)) {
 	// - If /sdcard/Android is still not accessible, we keep checking for mounts
 	//   mounted by ksu process
-	if (susfs_is_current_ksu_domain()) {
-		// - If it is unsharing, we re-use the old->mnt_id assign it for mnt->mnt_id directly
-		//   without going thru ida, but we need to set a bit VFSMOUNT_MNT_FLAGS_KSU_UNSHARED_MNT
-		//   on mnt->mnt.mnt_flags below, otherwise we find no other ways to identify if this
-		//   mnt->mnt_id is assigned without ida when it is being freed in mnt_free_id().
-		if (flag & CL_COPY_MNT_NS) {
-			mnt = susfs_alloc_unshare_ksu_vfsmnt(old->mnt_devname, old->mnt_id);
-			is_mnt_ksu_unshared = true;
+		if (susfs_is_current_ksu_domain()) {
+			// - If it is unsharing, we re-use the old->mnt_id assign it for mnt->mnt_id directly
+			//   without going thru ida, but we need to set a bit VFSMOUNT_MNT_FLAGS_KSU_UNSHARED_MNT
+			//   on mnt->mnt.mnt_flags below, otherwise we find no other ways to identify if this
+			//   mnt->mnt_id is assigned without ida when it is being freed in mnt_free_id().
+			if (flag & CL_COPY_MNT_NS) {
+				mnt = susfs_alloc_unshare_ksu_vfsmnt(old->mnt_devname, old->mnt_id);
+				is_mnt_ksu_unshared = true;
+				goto bypass_orig_flow;
+			}
+			// else we just go assign fake mnt_id starting with DEFAULT_KSU_MNT_ID
+			mnt = susfs_alloc_non_unshare_ksu_vfsmnt(old->mnt_devname);
 			goto bypass_orig_flow;
 		}
-		// else we just go assign fake mnt_id starting with DEFAULT_KSU_MNT_ID
-		mnt = susfs_alloc_non_unshare_ksu_vfsmnt(old->mnt_devname);
-		goto bypass_orig_flow;
 	}
-
-skip_checking_for_ksu_proc:
 	// - We keep checking all processes and if old->mnt_id >= DEFAULT_KSU_MNT_ID,
 	//   go assign fake mnt_id starting with DEFAULT_KSU_MNT_ID
 	if (old->mnt_id >= DEFAULT_KSU_MNT_ID) {
@@ -1296,11 +1288,12 @@ bypass_orig_flow:
 	mnt->mnt.mnt_flags = old->mnt.mnt_flags;
 	mnt->mnt.mnt_flags &= ~(MNT_WRITE_HOLD|MNT_MARKED|MNT_INTERNAL);
 
+
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 	if (unlikely(is_mnt_ksu_unshared))
 		mnt->mnt.mnt_flags |= VFSMOUNT_MNT_FLAGS_KSU_UNSHARED_MNT;
-		
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+
 	/* Don't allow unprivileged users to change mount flags */
 	if (flag & CL_UNPRIVILEGED) {
 		mnt->mnt.mnt_flags |= MNT_LOCK_ATIME;
@@ -3855,10 +3848,13 @@ const struct proc_ns_operations mntns_operations = {
 };
 
 #ifdef CONFIG_KSU_SUSFS
-/* - To retrieve the non sus mount id from mount */
+/* - To retrieve the non sus mnt_id from mount */
 int susfs_get_non_sus_mnt_id_from_mnt(struct mount *orig_mnt) {
 	struct mount *mnt = orig_mnt;
 	int mnt_id;
+
+	if (mnt->mnt_id < DEFAULT_KSU_MNT_ID)
+		return mnt->mnt_id;
 
 	lock_mount_hash();
 	for (; mnt && mnt->mnt_parent && mnt != mnt->mnt_parent && mnt->mnt_id >= DEFAULT_KSU_MNT_ID; mnt = mnt->mnt_parent) { }
@@ -3870,6 +3866,12 @@ int susfs_get_non_sus_mnt_id_from_mnt(struct mount *orig_mnt) {
 /* - To retrieve the non sus vfsmount from vfsmount, takes a reference on &mnt->mnt and mnt->mnt.mnt_root */
 struct vfsmount *susfs_get_non_sus_vfsmnt_from_vfsmnt(struct vfsmount *vfsmnt) {
 	struct mount *mnt = real_mount(vfsmnt);
+
+	if (mnt->mnt_id < DEFAULT_KSU_MNT_ID) {
+		mntget(&mnt->mnt);
+		dget(mnt->mnt.mnt_root);
+		return &mnt->mnt;
+	}
 
 	lock_mount_hash();
 	for (; mnt && mnt->mnt_parent && mnt != mnt->mnt_parent && mnt->mnt_id >= DEFAULT_KSU_MNT_ID; mnt = mnt->mnt_parent) { }

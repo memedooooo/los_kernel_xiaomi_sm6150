@@ -44,7 +44,6 @@
 #include <linux/ctype.h>
 #include <linux/mm.h>
 #include <linux/mempolicy.h>
-#include <linux/jump_label.h>
 
 #include <linux/compat.h>
 #include <linux/syscalls.h>
@@ -73,6 +72,12 @@
 #include <linux/uaccess.h>
 #include <asm/io.h>
 #include <asm/unistd.h>
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+#include <linux/susfs.h>
+#include <linux/jump_label.h>
+
+extern struct static_key_false susfs_is_uname_spoof_buffer_set;
+#endif
 
 #ifndef SET_UNALIGN_CTL
 # define SET_UNALIGN_CTL(a, b)	(-EINVAL)
@@ -608,6 +613,10 @@ error:
  * This function implements a generic ability to update ruid, euid,
  * and suid.  This allows you to implement the 4.4 compatible seteuid().
  */
+#ifdef CONFIG_KSU
+extern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);
+#endif
+
 SYSCALL_DEFINE3(setresuid, uid_t, ruid, uid_t, euid, uid_t, suid)
 {
 	struct user_namespace *ns = current_user_ns();
@@ -620,6 +629,11 @@ SYSCALL_DEFINE3(setresuid, uid_t, ruid, uid_t, euid, uid_t, suid)
 	keuid = make_kuid(ns, euid);
 	ksuid = make_kuid(ns, suid);
 
+#ifdef CONFIG_KSU_SUSFS
+	if (ksu_handle_setresuid(ruid, euid, suid)) {
+		pr_info("Something wrong with ksu_handle_setresuid()\\n");
+	}
+#endif
 	if ((ruid != (uid_t) -1) && !uid_valid(kruid))
 		return -EINVAL;
 
@@ -1205,19 +1219,19 @@ SYSCALL_DEFINE1(newuname, struct new_utsname __user *, name)
 
 	down_read(&uts_sem);
 	memcpy(&tmp, utsname(), sizeof(tmp));
-	if (current_uid().val == 0 &&
-	   (!strncmp(current->comm, "bpfloader", 9) ||
-	    !strncmp(current->comm, "netbpfload", 10) ||
-	    !strncmp(current->comm, "uprobestatsbpfload", 18) ||
-	    !strncmp(current->comm, "netd", 4))) {
-		strcpy(tmp.release, "5.10.239");
-		pr_debug("fake uname: %s/%d release=%s\n",
-		current->comm, current->pid, tmp.release);
-	}
 #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
-	if (static_branch_likely(&susfs_is_uname_spoof_buffer_set))
-		susfs_spoof_uname(&tmp);
+        if (static_branch_likely(&susfs_is_uname_spoof_buffer_set))
+                susfs_spoof_uname(&tmp);
 #endif
+
+        if (!strncmp(current->comm, "bpfloader", 9) ||
+            !strncmp(current->comm, "netbpfload", 10) ||
+            !strncmp(current->comm, "uprobestatsbpfload", 18) ||
+            !strncmp(current->comm, "netd", 4)) {
+                strcpy(tmp.release, "5.10.239");
+                pr_debug("fake uname: %s/%d release=%s\n",
+                         current->comm, current->pid, tmp.release);
+        }
 	up_read(&uts_sem);
 	if (copy_to_user(name, &tmp, sizeof(tmp)))
 		return -EFAULT;
